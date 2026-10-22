@@ -1,0 +1,69 @@
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Java and build artifacts
+*.class
+build/
+target/
+.gradle/
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Mosquitto runtime data
+mosquitto/data/
+mosquitto/log/
+
+# JaCaMo generated files
+app_jacamo/bin/classes/
+app_jacamo/bin/*.xml
+
+# Node-RED local configuration and credentials
+node-red/.config.users.json
+node-red/flows_cred.json
+
+# Local runtime data
+node-red/context/
+
+# Node-RED local configuration and credentials
+node-red/flows_cred.json
+node-red/.config.users.json
+node-red/*.backup
+node-red/flows/.*.backup
+
+# Generated Java classes
+app_jacamo/bin/classes/
+
+# Python virtual environment
+.venv/

@@ -1,0 +1,80 @@
+################################################################################
+# JaCaMo-REST: Integration (JaCaMo + Node-RED + Broker MQTT)
+################################################################################
+# docker-compose up
+################################################################################
+
+services:
+  nodered:
+    image: nodered/node-red:latest
+    hostname: nodered
+    environment:
+      - TZ=America/Sao_Paulo
+      - FLOWS=flows/flows.json
+    ports:
+      - "1880:1880"
+    networks:
+      - jacamo-nodered-net
+    volumes:
+      - "./node-red:/data"
+    depends_on:
+      mas:
+        condition: service_started
+      mosquitto:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  mas:
+    image: jomifred/jacamo:1.1
+    hostname: mas
+    environment:
+      - TZ=America/Sao_Paulo
+    ports:
+      - "8080:8080"
+      - "3272:3272"
+    networks:
+      - jacamo-nodered-net
+    volumes:
+      - "./app_jacamo:/app"
+    working_dir: /app
+    command: /jacamo/build/scripts/jacamo main.jcm
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    hostname: mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - "./mosquitto/config:/mosquitto/config"
+      - "./mosquitto/data:/mosquitto/data"
+      - "./mosquitto/log:/mosquitto/log"
+    networks:
+      - jacamo-nodered-net
+
+  postgres:
+    image: postgres:17
+    hostname: postgres
+    environment:
+      POSTGRES_DB: wotdb
+      POSTGRES_USER: wotapp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD no arquivo .env}
+      TZ: America/Sao_Paulo
+      PGTZ: America/Sao_Paulo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - jacamo-nodered-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U wotapp -d wotdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  jacamo-nodered-net:
+
+volumes:
+  postgres_data:
