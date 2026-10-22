@@ -1,230 +1,156 @@
-# Integração WoT, JaCaMo, Node-RED, Mosquitto e PostgreSQL
+# Integração WoT: JaCaMo, Node-RED, Mosquitto e PostgreSQL
 
-## 1. Visão geral
+Infraestrutura experimental para integração de Sistemas Multiagentes (MAS) com dispositivos IoT, utilizando JaCaMo, Jason, CArtAgO, Node-RED, Eclipse Mosquitto e PostgreSQL.
 
-Este projeto implementa uma infraestrutura experimental para integração entre Sistemas Multiagentes (MAS), dispositivos IoT e serviços da Web das Coisas (Web of Things — WoT).
+A implementação permite que um agente autônomo receba informações de propriedades, perceba notificações de eventos, solicite ações a dispositivos e acompanhe os estados reportados. As observações, os eventos e as solicitações de atuação são registrados em banco de dados, proporcionando uma base experimental para investigar a interação entre agentes autônomos e ambientes IoT/WoT.
 
-A arquitetura utiliza JaCaMo, Jason, CArtAgO, Node-RED, Eclipse Mosquitto e PostgreSQL para permitir que agentes autônomos recebam informações do ambiente, mantenham crenças sobre propriedades observadas, recebam notificações de eventos e solicitem ações a dispositivos.
+> **Estado do projeto:** os cenários com `device_01`, `device_02` e `device_03` foram executados e testados. Um `device_04` foi utilizado para validar a recepção e a persistência de um parâmetro numérico. Consulte [Validação](#12-validação-e-limitações-conhecidas) para os limites dos testes.
 
-A implementação constitui uma base experimental para pesquisas sobre agentes autônomos, descoberta de ambientes, affordances, descrições de Things e utilização de informações em ambientes IoT.
+## Sumário
 
-### Estado atual
+- [1. Objetivo e escopo](#1-objetivo-e-escopo)
+- [2. Arquitetura](#2-arquitetura)
+- [3. Componentes](#3-componentes)
+- [4. Dispositivos e cenários](#4-dispositivos-e-cenários)
+- [5. Contratos de interação](#5-contratos-de-interação)
+- [6. Tópicos MQTT](#6-tópicos-mqtt)
+- [7. Persistência no PostgreSQL](#7-persistência-no-postgresql)
+- [8. Estrutura do repositório](#8-estrutura-do-repositório)
+- [9. Pré-requisitos e configuração](#9-pré-requisitos-e-configuração)
+- [10. Executar e inspecionar a infraestrutura](#10-executar-e-inspecionar-a-infraestrutura)
+- [11. Executar os clientes auxiliares](#11-executar-os-clientes-auxiliares)
+- [12. Validação e limitações conhecidas](#12-validação-e-limitações-conhecidas)
+- [13. Segurança e boas práticas](#13-segurança-e-boas-práticas)
+- [14. Projeto de pesquisa](#14-projeto-de-pesquisa)
 
-A infraestrutura foi executada e testada com os seguintes componentes:
+## 1. Objetivo e escopo
 
-- Agente Jason `bob`, executado na plataforma JaCaMo.
+O projeto implementa uma infraestrutura experimental para estudar a interação entre Sistemas Multiagentes (MAS), dispositivos IoT e conceitos da Web of Things (WoT).
+
+A infraestrutura permite:
+
+1. encaminhar solicitações entre o agente Jason e os fluxos de integração;
+2. receber valores de propriedades publicados por Things;
+3. representar propriedades observadas como crenças do agente;
+4. encaminhar notificações assíncronas de eventos;
+5. encaminhar solicitações de atuação a dispositivos ou simuladores;
+6. persistir observações, eventos e solicitações de atuação no PostgreSQL;
+7. preservar tipos de dados em parâmetros JSON, incluindo números.
+
+O projeto é uma **base experimental de integração**. Embora os tópicos usem uma convenção inspirada na WoT, a existência desses tópicos não significa que todos os dispositivos já estejam descritos por Thing Descriptions (TDs) completas, nem que exista descoberta automática de Things implementada.
+
+### Escopo funcional atual
+
+- Agente Jason `bob`, executado pela plataforma JaCaMo.
 - Artefato CArtAgO `MQTTArt`.
-- Node-RED como mecanismo de integração entre REST/HTTP e MQTT.
+- Node-RED como camada de integração entre REST/HTTP e MQTT.
 - Eclipse Mosquitto como broker MQTT.
-- PostgreSQL para persistência de observações, eventos e ações.
-- Três dispositivos integrados aos fluxos de comunicação, observação e atuação.
+- PostgreSQL 17 para persistência.
+- Três cenários principais de comunicação, observação e atuação (`device_01`, `device_02` e `device_03`).
+- Um teste de persistência de parâmetro numérico (`device_04`).
 
-Os cenários de atuação testados incluem:
-
-- `device_01`: controle de LED, observação de iluminância e eventos de baixa e alta iluminância.
-- `device_02`: simulação de temperatura e umidade, controle de relé e evento de superaquecimento.
-- `device_03`: exemplo de atuação sobre um motor, com estados `start` e `stop`.
-
-Um teste adicional com `device_04` demonstrou a recepção e a persistência de um parâmetro numérico (`22.5`) no PostgreSQL. A execução completa desse dispositivo ainda não faz parte dos cenários validados.
-
-**Importante:** a validação da comunicação e dos estados reportados não significa, por si só, que todos os dispositivos correspondam a hardware físico. O dispositivo de temperatura e umidade é simulado por software, e a implementação física dos demais dispositivos deve ser verificada individualmente.
-
----
-
-## 2. Objetivos
-
-O projeto tem os seguintes objetivos técnicos:
-
-1. Integrar um agente Jason a dispositivos e serviços MQTT.
-2. Receber propriedades reportadas pelas Things e representá-las como crenças do agente.
-3. Receber e processar notificações assíncronas de eventos.
-4. Encaminhar solicitações de atuação do agente para dispositivos.
-5. Persistir observações, eventos e solicitações de ações em um banco de dados relacional.
-6. Preservar tipos de dados, incluindo valores numéricos utilizados como parâmetros de ações.
-7. Preparar a infraestrutura para integração com Thing Descriptions (TDs) da WoT.
-8. Fornecer uma base experimental para investigar mecanismos de descoberta, interpretação e utilização de informações por agentes autônomos.
-
----
-
-## 3. Arquitetura
-
-A arquitetura é composta por cinco serviços e uma camada de dispositivos.
+## 2. Arquitetura
 
 ```text
-+-------------------------------------------------------+
-|                  Sistema Multiagente                  |
-|                                                       |
-|                    Jason - Bob                        |
-|                                                       |
-|       Crenças, solicitações e planos de atuação       |
-+---------------------------+---------------------------+
-                            |
-                            v
-+-------------------------------------------------------+
-|                   JaCaMo / CArtAgO                    |
-|                                                       |
-|                     MQTTArt                           |
-|                                                       |
-|    communication() | reporting() | monitoring()       |
-|                       acting()                        |
-+---------------------------+---------------------------+
-                            |
-                       REST / HTTP
-                            |
-                            v
-+-------------------------------------------------------+
-|                      Node-RED                         |
-|                                                       |
-|  Recepção de solicitações e processamento de ações    |
-|  Normalização de propriedades e eventos               |
-|  Persistência e confirmação de ações                  |
-+---------------------------+---------------------------+
-                            |
-                            v
-+-------------------------------------------------------+
-|                   Mosquitto MQTT                      |
-|                                                       |
-|              Broker de mensagens MQTT                 |
-+---------------------------+---------------------------+
-                            |
-                            v
-+-------------------------------------------------------+
-|                     Dispositivos                      |
-|                                                       |
-|  device_01: iluminância, LED e eventos                |
-|  device_02: temperatura, umidade e relé               |
-|  device_03: estado do motor e ações start/stop        |
-|  device_04: cenário experimental de parâmetro numérico|
-+-------------------------------------------------------+
-
-                            |
-                            v
-+-------------------------------------------------------+
-|                     PostgreSQL                        |
-|                                                       |
-|    observations | device_events | agent_actions       |
-+-------------------------------------------------------+
+                    SISTEMA MULTIAGENTE
+                  ┌──────────────────────┐
+                  │     Jason: bob       │
+                  │  crenças e planos    │
+                  └──────────┬───────────┘
+                             │
+                  ┌──────────▼───────────┐
+                  │    JaCaMo/CArtAgO    │
+                  │      MQTTArt         │
+                  │   communication()    │
+                  │   reporting()        │
+                  │   monitoring()       │
+                  │   acting()           │
+                  └──────────┬───────────┘
+                             │ REST/HTTP
+                  ┌──────────▼───────────┐
+                  │       Node-RED       │
+                  │    roteamento,       │
+                  │    normalização e    │
+                  │    persistência      │
+                  └────┬────────────┬────┘
+                       │            │
+                      MQTT          │ SQL
+                       │            │
+                ┌──────▼─────┐  ┌───▼─────────┐
+                │  Mosquitto  │ │ PostgreSQL   │
+                │ broker MQTT │ │ observações, │
+                └──────┬──────┘ │ eventos e    │
+                       │        │ ações        │
+             ┌─────────▼──────┐ └──────────────┘
+             │ Things e       │
+             │ simuladores    │
+             │ device_01..04  │
+             └────────────────┘
 ```
 
-O PostgreSQL é utilizado pelo Node-RED para armazenar os dados recebidos e registrar o ciclo das solicitações de atuação.
+### 2.1. Fluxo de observação de propriedade
 
-Os principais fluxos são:
-
-### 3.1. Observações de propriedades
+1. Uma Thing publica uma propriedade em um tópico MQTT.
+2. O Node-RED recebe e normaliza a mensagem.
+3. A observação é registrada na tabela `observations`.
+4. O Node-RED encaminha a informação ao artefato `MQTTArt` por REST/HTTP.
+5. O agente Jason recebe a informação e atualiza a crença correspondente, conforme os planos de `bob.asl`.
 
 ```text
-Thing
-  |
-  v
-MQTT
-  |
-  v
-Node-RED
-  |
-  +--> Normalização
-  |
-  +--> PostgreSQL: observations
-  |
-  v
-REST / reporting()
-  |
-  v
-MQTTArt
-  |
-  v
-Crenças do agente Jason
+Thing → Mosquitto → Node-RED → PostgreSQL
+                                └→ REST → MQTTArt → Jason
 ```
 
-### 3.2. Notificações de eventos
+### 2.2. Fluxo de evento
+
+1. A Thing publica uma notificação no tópico de evento.
+2. O Node-RED registra o evento em `device_events`.
+3. O Node-RED encaminha a notificação à operação `monitoring()` do artefato.
+4. O artefato emite um sinal que pode ser percebido pelo agente.
 
 ```text
-Thing
-  |
-  v
-MQTT
-  |
-  v
-Node-RED
-  |
-  +--> PostgreSQL: device_events
-  |
-  v
-REST / monitoring()
-  |
-  v
-MQTTArt
-  |
-  v
-Evento percebido pelo agente
+Thing → Mosquitto → Node-RED → PostgreSQL
+                                └→ REST → MQTTArt → Jason
 ```
 
-### 3.3. Solicitações de atuação
+### 2.3. Fluxo de atuação
+
+1. O agente solicita uma ação.
+2. O artefato encaminha a solicitação ao endpoint `/act` do Node-RED por meio da infraestrutura REST.
+3. A solicitação é registrada em `agent_actions`.
+4. O Node-RED publica a mensagem no tópico MQTT da ação.
+5. O dispositivo ou simulador processa a solicitação e publica o estado resultante.
+6. O Node-RED persiste a propriedade reportada e atualiza o estado da solicitação conforme o mecanismo de confirmação atual.
+7. O agente recebe o estado reportado como uma nova informação.
 
 ```text
-Agente Jason
-  |
-  v
-MQTTArt.acting()
-  |
-  v
-JaCaMo REST
-  |
-  v
-Node-RED: POST /act
-  |
-  v
-PostgreSQL: agent_actions
-  |
-  v
-Publicação MQTT
-  |
-  v
-Dispositivo
-  |
-  v
-Publicação do estado atualizado
-  |
-  v
-Node-RED
-  |
-  +--> Atualização de agent_actions
-  |
-  +--> Persistência da propriedade
-  |
-  v
-Agente Jason recebe o estado reportado
+Jason → MQTTArt → REST /act → Node-RED → PostgreSQL
+                                      └→ Mosquitto → Thing
+Thing → Mosquitto → Node-RED → Jason (estado reportado)
 ```
 
-A confirmação atual das ações é baseada na correspondência entre a solicitação pendente e o estado reportado pela propriedade do dispositivo.
+**Limitação conhecida:** a confirmação atual associa o estado reportado à solicitação pendente por correspondência entre dispositivo, ação, entrada e estado. A correlação explícita da resposta por `action_id` ainda não está implementada.
 
-A correlação explícita das confirmações por `action_id` não está implementada nesta versão.
-
----
-
-## 4. Componentes e tecnologias
+## 3. Componentes
 
 | Componente | Tecnologia | Responsabilidade |
 |---|---|---|
-| Sistema Multiagente | JaCaMo | Executar e organizar o ambiente multiagente |
+| Plataforma multiagente | JaCaMo | Executar e organizar o ambiente multiagente |
 | Agente | Jason / AgentSpeak | Manter crenças e executar planos |
-| Integração agente-ambiente | CArtAgO | Disponibilizar operações e observações |
+| Integração agente–ambiente | CArtAgO | Expor operações, propriedades observáveis e sinais |
 | Artefato | `MQTTArt.java` | Encaminhar solicitações, propriedades e eventos |
 | Integração de fluxos | Node-RED | Processar mensagens, realizar chamadas REST e publicar MQTT |
 | Broker | Eclipse Mosquitto | Distribuir mensagens MQTT |
 | Persistência | PostgreSQL 17 | Registrar observações, eventos e ações |
 | Dispositivos e simuladores | ESP32 e Python | Publicar propriedades, receber comandos e gerar eventos |
-| Orquestração | Docker Compose | Inicializar os serviços da infraestrutura |
-| Descrição de Things | WoT Thing Description | Descrever propriedades, ações e eventos dos dispositivos |
+| Orquestração | Docker Compose | Inicializar os serviços em contêineres |
+| Modelo de descrição | WoT Thing Description (TD) | Referência para descrever propriedades, ações e eventos; integração completa com TDs é trabalho a desenvolver |
 
----
+## 4. Dispositivos e cenários
 
-## 5. Dispositivos integrados
+### 4.1. `device_01` — iluminância e LED
 
-### 5.1. device_01 — iluminância e LED
-
-O dispositivo publica valores de iluminância, disponibiliza o estado do LED e emite eventos quando os valores observados atingem determinadas condições.
-
-| Elemento | Nome |
+| Tipo | Identificador |
 |---|---|
 | Propriedade | `illuminance` |
 | Propriedade | `ledState` |
@@ -232,7 +158,7 @@ O dispositivo publica valores de iluminância, disponibiliza o estado do LED e e
 | Evento | `lowIlluminance` |
 | Evento | `highIlluminance` |
 
-Exemplos de tópicos:
+Tópicos principais:
 
 ```text
 wot/device_01/properties/illuminance
@@ -249,13 +175,11 @@ setLed(on)
 setLed(off)
 ```
 
-Os testes de integração demonstraram a recepção dos comandos e a observação dos estados `on` e `off`.
+Os testes demonstraram a recepção dos comandos e a observação dos estados `on` e `off`. A presença de um ESP32 no projeto não deve ser interpretada como evidência de que todas as propriedades e eventos estejam associados a sensores físicos; a configuração física deve ser conferida no cenário usado.
 
-### 5.2. device_02 — temperatura, umidade e relé
+### 4.2. `device_02` — temperatura, umidade e relé
 
-O dispositivo utiliza um simulador Python para gerar valores de temperatura e umidade, além de disponibilizar um estado de relé e um evento de superaquecimento.
-
-| Elemento | Nome |
+| Tipo | Identificador |
 |---|---|
 | Propriedade | `temperature` |
 | Propriedade | `humidity` |
@@ -263,7 +187,7 @@ O dispositivo utiliza um simulador Python para gerar valores de temperatura e um
 | Ação | `setRelay` |
 | Evento | `overheating` |
 
-Exemplos de tópicos:
+Tópicos principais:
 
 ```text
 wot/device_02/properties/temperature
@@ -280,20 +204,18 @@ setRelay(on)
 setRelay(off)
 ```
 
-O simulador publica valores de temperatura e umidade. Quando a temperatura ultrapassa o limiar definido na implementação, publica o evento `overheating`.
+O simulador Python gera valores de temperatura e umidade. Quando a temperatura ultrapassa o limiar configurado na implementação, é publicado o evento `overheating`.
 
-**Nota:** o comportamento do relé no simulador não deve ser interpretado como acionamento de um relé físico.
+> **Nota:** o estado do relé no cenário simulado não equivale ao acionamento comprovado de um relé físico.
 
-### 5.3. device_03 — motor
+### 4.3. `device_03` — motor
 
-O terceiro dispositivo implementa um cenário de atuação com estados `start` e `stop`.
-
-| Elemento | Nome |
+| Tipo | Identificador |
 |---|---|
 | Propriedade | `motorState` |
 | Ação | `setMotor` |
 
-Tópicos:
+Tópicos principais:
 
 ```text
 wot/device_03/properties/motorState
@@ -307,21 +229,21 @@ setMotor(start)
 setMotor(stop)
 ```
 
-O agente recebeu os estados reportados `start` e `stop` após as solicitações de atuação.
+O recebimento dos estados `start` e `stop` foi validado por meio de mensagens MQTT enviadas com o aplicativo MQTT Dash. O teste validou o fluxo de comunicação e a representação do estado reportado pelo agente, não o acionamento de um motor físico.
 
-A implementação física do motor deve ser documentada separadamente caso seja utilizado hardware real.
+> **Nota:** o estado do motor no cenário simulado não equivale ao acionamento físico. Caso seja utilizado um motor físico, sua montagem, acionamento e procedimentos de segurança devem ser seguidos adequadamente.
 
-### 5.4. device_04 — teste de parâmetro numérico
+### 4.4. `device_04` — parâmetro numérico
 
-O quarto dispositivo foi utilizado em um teste de recepção e persistência de parâmetros numéricos.
+O quarto cenário foi usado para testar a recepção e a persistência de um parâmetro numérico.
 
-Solicitação de exemplo:
+Exemplo de solicitação:
 
 ```text
 action(device_04, setAirconditioner, 22.5)
 ```
 
-O Node-RED recebeu a estrutura de ação e o PostgreSQL registrou:
+Resultado observado no PostgreSQL:
 
 | Campo | Valor |
 |---|---|
@@ -331,27 +253,17 @@ O Node-RED recebeu a estrutura de ação e o PostgreSQL registrou:
 | `jsonb_typeof(input)` | `number` |
 | `status` | `requested` |
 
-Esse teste confirma a preservação do tipo numérico na recepção da solicitação e na persistência do parâmetro.
+Esse teste demonstra que o parâmetro numérico foi recebido e armazenado como número em JSONB. **Não demonstra a execução completa da ação** sobre um dispositivo.
 
-Ele não demonstra ainda a execução completa de uma ação sobre um dispositivo físico ou simulado.
+## 5. Contratos de interação
 
----
+O artefato `MQTTArt.java` disponibiliza quatro operações principais para integrar o agente aos fluxos.
 
-## 6. Contratos de interação do MQTTArt
+### 5.1. `communication()`
 
-O artefato `MQTTArt.java` disponibiliza quatro operações principais.
+Recebe uma solicitação destinada ao agente. O formato lógico da mensagem de entrada inclui um alvo, uma operação e dados.
 
-### 6.1. Communication
-
-Recebe uma solicitação destinada ao agente.
-
-Formato lógico:
-
-```text
-request(Target, Operation, Data)
-```
-
-Exemplo de mensagem MQTT:
+Exemplo de payload JSON:
 
 ```json
 {
@@ -361,85 +273,55 @@ Exemplo de mensagem MQTT:
 }
 ```
 
-O Node-RED encaminha os campos para a operação `communication()` do artefato.
+O Node-RED encaminha a mensagem para a operação `communication()` do artefato. A estrutura exata do payload deve permanecer consistente entre o cliente, o fluxo e o agente.
 
-### 6.2. Reporting
+### 5.2. `reporting()`
 
 Recebe o valor de uma propriedade reportada por uma Thing.
 
-Formato lógico:
-
-```text
-report(Thing, Property, Value)
-```
-
-Exemplo:
+Exemplo lógico:
 
 ```text
 report(device_02, temperature, 38.2)
 ```
 
-Os valores numéricos são convertidos em termos numéricos Jason. Strings são representadas como átomos.
+O artefato converte valores JSON em termos Jason: números JSON são convertidos em termos numéricos, booleanos em átomos booleanos, strings em átomos e objetos/arrays em representação textual JSON. O agente possui planos para propriedades conhecidas, como `temperature`, `humidity`, `illuminance`, `ledState`, `relayState` e `motorState`.
 
-O agente utiliza planos específicos para propriedades conhecidas, como `temperature`, `humidity`, `illuminance`, `ledState`, `relayState` e `motorState`.
+### 5.3. `acting()`
 
-### 6.3. Acting
-
-Encaminha uma solicitação de atuação.
-
-Formato lógico:
-
-```text
-action(Thing, Action, Input)
-```
-
-Exemplo:
+Encaminha uma solicitação de atuação. Exemplo lógico:
 
 ```text
 action(device_01, setLed, on)
 ```
 
-O artefato delega a execução ao mecanismo `act()` da classe-base REST. O Node-RED recebe a solicitação no endpoint:
-
-```text
-POST /act
-```
-
-A ação é publicada no tópico:
+A operação delega a solicitação ao mecanismo REST `act()`, que chega ao endpoint `POST /act` do Node-RED. O fluxo publica a ação no tópico correspondente:
 
 ```text
 wot/<thing>/actions/<action>
 ```
 
-O parâmetro `Input` pode ser uma string ou um número, conforme o tipo de ação.
+O parâmetro pode ser textual ou numérico, conforme o contrato da ação. O tipo deve ser preservado durante a serialização e o processamento.
 
-### 6.4. Monitoring
+### 5.4. `monitoring()`
 
 Recebe notificações assíncronas de eventos.
 
-Formato lógico:
-
-```text
-event(Thing, Event, Data)
-```
-
-Exemplo:
+Exemplo lógico:
 
 ```text
 event(device_02, overheating, 41.8)
 ```
 
-O artefato emite o sinal `event`, percebido pelo agente Jason.
+O artefato emite o sinal `event`, que pode ser percebido pelo agente Jason.
 
----
+## 6. Tópicos MQTT
 
-## 7. Tópicos MQTT
-
-A arquitetura utiliza os seguintes padrões de tópicos:
+A convenção de tópicos adotada é:
 
 | Finalidade | Padrão |
 |---|---|
-| Comunicação destinada ao agente | `wot/agents/bob` |
+| Mensagens destinadas ao agente | `wot/agents/bob` |
 | Propriedades | `wot/{thing}/properties/{property}` |
 | Eventos | `wot/{thing}/events/{event}` |
 | Ações | `wot/{thing}/actions/{action}` |
@@ -464,25 +346,19 @@ wot/device_03/properties/motorState
 wot/device_03/actions/setMotor
 ```
 
-Os dispositivos, fluxos Node-RED e eventuais Thing Descriptions devem utilizar os mesmos identificadores e formatos de payload.
+Os identificadores de Things, propriedades, ações e eventos devem coincidir entre dispositivos, fluxos Node-RED, agente e eventuais Thing Descriptions. A convenção de tópicos é uma convenção do projeto, não uma afirmação de que o formato seja imposto pela especificação WoT.
 
----
+## 7. Persistência no PostgreSQL
 
-## 8. Persistência no PostgreSQL
-
-O banco de dados utilizado é `wotdb`, com o usuário de aplicação `wotapp`.
-
-O esquema inicial é definido em:
+A base de dados utilizada é `wotdb`, com usuário de aplicação `wotapp`. O esquema inicial está definido em:
 
 ```text
 postgres/init/001_schema.sql
 ```
 
-### 8.1. Tabela observations
+### 7.1. `observations`
 
 Armazena observações de propriedades recebidas dos dispositivos.
-
-Principais campos:
 
 | Campo | Descrição |
 |---|---|
@@ -491,11 +367,11 @@ Principais campos:
 | `property_name` | Nome da propriedade |
 | `numeric_value` | Valor numérico, quando aplicável |
 | `text_value` | Valor textual, quando aplicável |
-| `payload` | Payload original em JSONB |
+| `payload` | Payload em JSONB |
 | `topic` | Tópico MQTT de origem |
 | `observed_at` | Data e hora da observação |
 
-### 8.2. Tabela device_events
+### 7.2. `device_events`
 
 Armazena eventos recebidos dos dispositivos.
 
@@ -508,34 +384,34 @@ Armazena eventos recebidos dos dispositivos.
 | `topic` | Tópico MQTT de origem |
 | `received_at` | Data e hora de recepção |
 
-### 8.3. Tabela agent_actions
+### 7.3. `agent_actions`
 
-Registra as solicitações de atuação dos agentes e seus estados de processamento.
+Registra solicitações de atuação e o estado de processamento conhecido.
 
 | Campo | Descrição |
 |---|---|
-| `id` | Identificador da solicitação |
+| `id` | Identificador da solicitação no banco |
 | `agent_id` | Agente solicitante |
 | `thing_id` | Thing de destino |
 | `action_name` | Nome da ação |
-| `input` | Parâmetro de entrada em JSONB |
+| `input` | Parâmetro em JSONB |
 | `status` | Estado da solicitação |
 | `requested_at` | Data e hora da solicitação |
 | `completed_at` | Data e hora de conclusão |
 | `result` | Resultado registrado em JSONB |
 
-Estados utilizados:
+Estados documentados na implementação:
 
-- `requested`: solicitação registrada e aguardando confirmação.
-- `confirmed`: solicitação confirmada pelo mecanismo atual.
-- `failed`: solicitação registrada como falha.
+- `requested`: solicitação registrada e aguardando confirmação;
+- `confirmed`: solicitação confirmada pelo mecanismo atual;
+- `failed`: solicitação registrada como falha;
 - `unknown`: resultado desconhecido.
 
-A confirmação atual utiliza a correspondência entre o estado reportado e a solicitação pendente. A correlação explícita por `action_id` ainda não está implementada.
+A confirmação atual se baseia na correspondência entre o estado reportado e a solicitação pendente. A correlação explícita por `action_id` não está implementada nesta versão.
 
-### 8.4. Consultas úteis
+### 7.4. Consultas úteis
 
-Consultar as últimas observações:
+Últimas observações:
 
 ```sql
 SELECT
@@ -550,7 +426,7 @@ ORDER BY observed_at DESC
 LIMIT 20;
 ```
 
-Consultar os eventos recentes:
+Eventos recentes:
 
 ```sql
 SELECT
@@ -563,7 +439,7 @@ ORDER BY received_at DESC
 LIMIT 20;
 ```
 
-Consultar as últimas solicitações de atuação:
+Últimas solicitações de atuação:
 
 ```sql
 SELECT
@@ -596,195 +472,155 @@ ORDER BY id DESC
 LIMIT 20;
 ```
 
----
+## 8. Estrutura do repositório
 
-## 9. Estrutura do projeto
-
-A estrutura principal da aplicação é organizada em diretórios para os serviços, o agente, os fluxos e os dispositivos.
+A estrutura principal esperada é semelhante à seguinte. A estrutura exata deve ser confirmada nos arquivos versionados do repositório:
 
 ```text
-artigo/
+project/
 ├── docker-compose.yml
-├── .env
+├── .env                       # local; não versionar credenciais
 ├── .gitignore
 ├── README.md
-│
+├── AppDevice.py
+├── AppMsgBob.py
 ├── app_jacamo/
-│   ├── main.jcm
 │   ├── bob.asl
+│   ├── main.xml                # configuração usada pelo projeto, se aplicável
 │   └── src/
 │       └── env/
 │           └── net/
 │               └── MQTTArt.java
-│
 ├── node-red/
-│   ├── settings.js
 │   ├── package.json
-│   └── [arquivos de fluxos e configuração]
-│
-├── mosquitto/
-│   ├── config/
-│   │   └── mosquitto.conf
-│   ├── data/
-│   └── log/
-│
+│   ├── package-lock.json
+│   └── flows/
+│       └── flows.json
 ├── postgres/
 │   └── init/
 │       └── 001_schema.sql
-│
-├── sketchESP/
-│   └── sketchESP.ino
-│
-├── AppDevice.py
-└── AppMsgBob.py
+└── sketchESP/
+    └── sketchESP.ino
 ```
 
-Os nomes e caminhos acima devem ser conferidos com a versão efetivamente mantida no repositório.
+A configuração de execução do Node-RED, os arquivos do Mosquitto e outros recursos podem estar presentes conforme a versão do projeto. Diretórios de dependências instaladas, caches, credenciais locais e classes compiladas não devem ser tratados como código-fonte.
 
-Arquivos de execução, dependências instaladas, caches e ambientes virtuais não devem ser tratados como código-fonte da aplicação.
+## 9. Pré-requisitos e configuração
 
----
+### 9.1. Pré-requisitos
 
-## 10. Pré-requisitos
+- Docker Engine;
+- Docker Compose (plugin `docker compose`);
+- acesso ao repositório;
+- Python 3, caso os simuladores ou clientes auxiliares sejam utilizados;
+- Arduino IDE ou ferramenta equivalente, caso seja utilizado um ESP32 físico.
 
-- Docker Engine.
-- Docker Compose.
-- Acesso ao repositório do projeto.
-- Python 3, caso sejam utilizados os simuladores ou clientes auxiliares.
-- Arduino IDE ou ferramenta equivalente, caso seja utilizado o ESP32 físico.
+Os serviços principais são executados em contêineres. Os requisitos de portas e variáveis dependem do `docker-compose.yml` versionado.
 
-Os serviços principais são executados em contêineres Docker.
+### 9.2. Variáveis de ambiente
 
----
-
-## 11. Configuração
-
-### 11.1. Variáveis de ambiente
-
-O Docker Compose utiliza a variável `POSTGRES_PASSWORD` para configurar a senha do usuário PostgreSQL.
-
-Crie o arquivo `.env` na raiz do projeto, se ainda não existir:
+O Compose utiliza `POSTGRES_PASSWORD` para configurar a senha do PostgreSQL. Se a configuração do projeto ainda não tiver um arquivo `.env`, crie-o na raiz:
 
 ```dotenv
 POSTGRES_PASSWORD=defina_uma_senha_local
 ```
 
-Substitua o valor por uma senha apropriada para o ambiente.
+Substitua o exemplo por uma senha local apropriada. O arquivo `.env` deve permanecer fora do Git se contiver credenciais reais. Se o projeto precisar de outras variáveis, confira o `docker-compose.yml` e documente-as aqui.
 
-Não versione o arquivo `.env` se ele contiver credenciais reais.
+### 9.3. Broker MQTT
 
-### 11.2. Broker MQTT
+Antes de executar os clientes, verifique a configuração do Mosquitto:
 
-O Mosquitto deve estar configurado para aceitar conexões dos serviços autorizados e dos clientes de teste.
+- porta do broker;
+- autenticação exigida;
+- usuários e senhas configurados;
+- permissões de publicação e assinatura;
+- endereço acessível para cada cliente.
 
-Confira:
+Dentro da rede Docker, os serviços devem usar os nomes de serviço definidos no Compose. Um cliente executado fora da rede Docker deve usar o endereço do host ou outro endereço alcançável. Um ESP32 conectado à rede Wi-Fi, por exemplo, normalmente não resolve o nome interno `mosquitto` da rede Docker.
 
-- Porta MQTT.
-- Usuário e senha, quando exigidos.
-- Configuração de autenticação.
-- Permissões de publicação e assinatura.
-- Endereço acessível pelos clientes externos.
+### 9.4. Clientes Python
 
-Dentro da rede Docker, os serviços devem utilizar os nomes definidos no Compose. Um cliente executado fora dessa rede deve utilizar o endereço do host ou o IP acessível do broker.
+Confira nos scripts auxiliares os parâmetros de conexão e configure o endereço e as credenciais adequados ao ambiente. Não publique senhas, tokens ou configurações privadas no repositório.
 
-Não assuma que o hostname `mosquitto` é resolvido diretamente por um ESP32 conectado à rede Wi-Fi.
+## 10. Executar e inspecionar a infraestrutura
 
-### 11.3. Clientes Python
+Execute os comandos a partir da raiz do repositório, onde está o `docker-compose.yml`.
 
-Os scripts auxiliares devem utilizar o endereço e as credenciais do broker disponíveis no ambiente de execução.
-
-Antes de executar os clientes, verifique os parâmetros de conexão no código ou na configuração local.
-
-Não compartilhe arquivos contendo senhas ou endereços privados sem necessidade.
-
----
-
-## 12. Executar a infraestrutura
-
-Execute os comandos a partir do diretório que contém o arquivo `docker-compose.yml`.
-
-### 12.1. Iniciar os serviços
+### 10.1. Validar a configuração e iniciar
 
 ```bash
+docker compose config
 docker compose up -d
 ```
 
-### 12.2. Verificar o estado dos contêineres
+O primeiro comando verifica a configuração resolvida do Compose. Se houver erros de variáveis ou YAML, corrija-os antes de iniciar.
+
+### 10.2. Verificar os serviços
 
 ```bash
 docker compose ps
 ```
 
-### 12.3. Consultar os logs
-
-JaCaMo:
+### 10.3. Consultar os logs
 
 ```bash
-docker compose logs -f mas
+docker compose logs --tail=100 mas
+docker compose logs --tail=100 nodered
+docker compose logs --tail=100 mosquitto
+docker compose logs --tail=100 postgres
 ```
 
-Node-RED:
+Para acompanhar continuamente um serviço, acrescente `-f`, por exemplo:
 
 ```bash
 docker compose logs -f nodered
 ```
 
-Mosquitto:
+Os nomes `mas`, `nodered`, `mosquitto` e `postgres` precisam corresponder aos nomes dos serviços definidos no arquivo Compose. Se forem diferentes, utilize os nomes efetivamente declarados.
 
-```bash
-docker compose logs -f mosquitto
-```
+### 10.4. Portas
 
-PostgreSQL:
+As portas publicadas documentadas na configuração atual incluem:
 
-```bash
-docker compose logs -f postgres
-```
-
-Os nomes utilizados nos comandos devem corresponder aos nomes dos serviços declarados no arquivo `docker-compose.yml`.
-
-### 12.4. Interfaces e portas
-
-Na configuração atual, as portas publicadas incluem:
-
-| Serviço | Porta | Finalidade |
+| Serviço | Porta no host | Uso |
 |---|---:|---|
 | Node-RED | `1880` | Editor e runtime dos fluxos |
 | JaCaMo REST | `8080` | Operações REST da plataforma |
-| Jason | `3272` | Endpoint configurado pela imagem JaCaMo |
+| Endpoint Jason | `3272` | Endpoint configurado pela imagem/serviço |
 | Mosquitto | `1883` | Broker MQTT |
 
-A disponibilidade depende da configuração do host e de não haver conflitos de portas.
+A disponibilidade depende do `docker-compose.yml`, da configuração do host e de não haver conflitos de portas. Confirme os mapeamentos com `docker compose ps` antes de acessar os serviços.
 
----
+### 10.5. Encerrar os serviços
 
-## 13. Executar clientes auxiliares
+Para parar e remover os contêineres da aplicação, preservando os volumes:
 
-Os clientes Python são utilizados para simular dispositivos ou enviar solicitações ao agente.
+```bash
+docker compose down
+```
 
-Antes da execução, confira os nomes reais dos scripts disponíveis no diretório do projeto e configure o endereço do broker.
+> Não acrescente `-v` se quiser preservar os volumes persistentes, incluindo os dados do PostgreSQL e do Mosquitto.
 
-Para iniciar um cliente:
+## 11. Executar os clientes auxiliares
+
+Os scripts da raiz podem ser utilizados em terminais separados, conforme o cenário experimental.
+
+Cliente/simulador de dispositivo:
 
 ```bash
 python3 AppDevice.py
 ```
 
-Para iniciar o cliente de mensagens destinado ao agente:
+Cliente para enviar mensagens destinadas ao agente:
 
 ```bash
 python3 AppMsgBob.py
 ```
 
-Esses comandos são exemplos para os arquivos existentes na raiz. Os scripts podem ser executados em terminais separados, conforme o cenário experimental.
+Confira o código dos scripts para verificar dependências Python, parâmetros de conexão e formato de entrada. Caso haja dependências listadas em um arquivo próprio, instale-as no ambiente virtual recomendado pelo projeto.
 
-O cliente de mensagens permite enviar solicitações com os campos:
-
-```text
-target operation data
-```
-
-Exemplos:
+O formato lógico utilizado pelo cliente de mensagens inclui alvo, operação e dados. Exemplos de comandos dos cenários validados:
 
 ```text
 device_01 setLed on
@@ -795,101 +631,63 @@ device_03 setMotor start
 device_03 setMotor stop
 ```
 
-A operação `setAirconditioner` com parâmetro numérico foi utilizada em um teste separado de recepção e persistência. Ela ainda não deve ser considerada uma ação operacional completamente integrada.
+A ação `setAirconditioner` com parâmetro `22.5` foi usada em um teste separado de recepção e persistência. Não deve ser considerada uma ação totalmente integrada enquanto o fluxo de execução correspondente não for implementado e validado.
 
----
+## 12. Validação e limitações conhecidas
 
-## 14. Validação da integração
+### 12.1. Cenários testados
 
-A execução realizada demonstrou os seguintes comportamentos:
-
-| Teste | Resultado observado |
+| Teste | Resultado registrado |
 |---|---|
 | Inicialização do agente Bob | Sucesso |
-| Recepção de `illuminance` | Sucesso |
-| Recepção de `temperature` e `humidity` | Sucesso |
-| Recepção de `ledState` | Sucesso |
-| Recepção de `relayState` | Sucesso |
-| Recepção de `motorState` | Sucesso |
-| Recepção de `lowIlluminance` | Sucesso |
-| Recepção de `highIlluminance` | Sucesso |
-| Recepção de `overheating` | Sucesso |
-| Solicitação `setLed(on/off)` | Testada |
-| Solicitação `setRelay(on/off)` | Testada |
-| Solicitação `setMotor(start/stop)` | Testada |
-| Persistência de observações no PostgreSQL | Testada |
-| Persistência de eventos no PostgreSQL | Testada |
+| Recepção de `illuminance` | Testada |
+| Recepção de `temperature` e `humidity` | Testada |
+| Recepção de `ledState` | Testada |
+| Recepção de `relayState` | Testada |
+| Recepção de `motorState` | Testada |
+| Recepção dos eventos `lowIlluminance` e `highIlluminance` | Testada |
+| Recepção do evento `overheating` | Testada |
+| Solicitações `setLed(on/off)` | Testadas |
+| Solicitações `setRelay(on/off)` | Testadas |
+| Solicitações `setMotor(start/stop)` | Testadas |
+| Persistência de observações | Testada |
+| Persistência de eventos | Testada |
 | Registro de solicitações de atuação | Testado |
-| Preservação de parâmetro numérico `22.5` em JSONB | Testada separadamente |
+| Preservação do parâmetro numérico `22.5` em JSONB | Testada separadamente |
 
-Os resultados representam a validação dos cenários executados, não uma garantia de que todos os possíveis estados de falha ou concorrência tenham sido testados.
+### 12.2. Limitações conhecidas
 
----
+1. **`device_04`:** o teste validou recepção e persistência do parâmetro numérico, não o ciclo completo de execução da ação.
+2. **Confirmação de ações:** a correlação explícita por `action_id` não está implementada. O mecanismo atual associa uma solicitação pendente ao estado reportado por correspondência de campos.
+3. **Dispositivos físicos e simulados:** o cenário de temperatura e umidade é simulado por Python. Os resultados de integração não comprovam, por si só, a existência de hardware físico em todos os cenários.
+4. **Thing Descriptions:** a convenção de tópicos e os nomes de propriedades/ações/eventos preparam a integração conceitual com WoT, mas não significam que exista descoberta automática e interpretação completa de TDs.
+5. **Conhecimento do agente:** nesta versão, os dados recebidos são tratados como informações do ambiente e representados como crenças Jason. O processo de construção, integração e evolução de conhecimento contextual não está implementado como parte desta infraestrutura.
+6. **Cobertura de testes:** os resultados documentam os cenários executados. Não constituem garantia de tratamento de todas as falhas, condições de concorrência ou perda de conectividade.
 
-## 15. Estado conceitual da pesquisa
+## 13. Segurança e boas práticas
 
-No estado atual do projeto, os dados recebidos dos dispositivos são tratados como informações provenientes do ambiente e representados como crenças do agente.
+- Não versione `.env` nem arquivos com senhas, tokens ou credenciais.
+- Mantenha `node-red/flows_cred.json` e configurações locais de usuários fora do repositório.
+- Não exponha o editor Node-RED ou endpoints REST à Internet sem autenticação, controle de acesso e configuração de rede apropriados.
+- Restrinja a publicação e a assinatura MQTT aos tópicos necessários.
+- Use credenciais específicas para a aplicação em vez de credenciais administrativas.
+- Não publique logs que contenham segredos ou dados privados.
+- Faça cópias de segurança dos dados persistentes antes de mudanças de esquema.
+- Revise `git status` e `git diff --cached` antes de cada commit.
 
-O agente atualiza crenças relativas às propriedades observadas, por exemplo:
+## 14. Projeto de pesquisa
 
-```text
-temperature(device_02, 38.2)
-humidity(device_02, 49.9)
-ledState(device_01, on)
-relayState(device_02, off)
-motorState(device_03, start)
-```
+A infraestrutura dá suporte experimental à investigação da interação entre agentes autônomos e ambientes IoT/WoT.
 
-A representação concreta dessas crenças depende da conversão realizada pelo artefato e dos planos definidos em `bob.asl`.
+Na versão atual:
 
-A implementação atual ainda não realiza explicitamente o processo de construção e integração de conhecimento proposto na tese.
-
-Essa separação é intencional: primeiro consolidamos a infraestrutura de comunicação, observação e atuação; posteriormente, investigaremos os mecanismos pelos quais o agente poderá descobrir recursos, interpretar descrições, selecionar informações relevantes e construir conhecimento contextual.
-
----
-
-## 16. Limitações e trabalhos futuros
-
-Os próximos passos do projeto incluem:
-
-1. Consolidar as Thing Descriptions dos dispositivos integrados.
-2. Verificar a correspondência entre TDs, tópicos MQTT, payloads e implementações dos dispositivos.
-3. Definir e documentar os tipos de dados e parâmetros de cada ação.
-4. Ampliar os testes de integração para cenários de erro e indisponibilidade.
-5. Avaliar mecanismos mais robustos de correlação entre solicitações e confirmações.
-6. Preparar a infraestrutura para experimentos de descoberta e interpretação de descrições WoT.
-7. Implementar e avaliar, posteriormente, as etapas do modelo de construção e utilização do conhecimento da tese.
-
-A implementação de correlação explícita de confirmações por `action_id` permanece fora do escopo da versão atual.
+- **Informação do ambiente:** valores de propriedades e notificações de eventos recebidos por MQTT.
+- **Representação no agente:** informações processadas e representadas como crenças Jason.
+- **Deliberação e atuação:** planos do agente podem solicitar ações por meio do artefato e dos fluxos.
+- **Persistência experimental:** observações, eventos e solicitações de atuação são registrados no PostgreSQL.
 
 ---
 
-## 17. Segurança e manutenção
+## Licença e contribuições
 
-Antes de compartilhar ou publicar o projeto:
-
-- Remova credenciais dos arquivos de código e de configuração.
-- Não versione senhas, tokens ou arquivos locais de credenciais.
-- Utilize variáveis de ambiente para dados sensíveis.
-- Revise as permissões de acesso ao broker MQTT.
-- Evite expor portas de desenvolvimento desnecessariamente.
-- Exclua ambientes virtuais, dependências instaladas, caches e arquivos de runtime do pacote de código-fonte.
-- Documente as dependências necessárias para reconstruir os ambientes.
-
-**Atenção:** não utilize `docker compose down -v` para interromper a aplicação durante o desenvolvimento normal, pois a opção `-v` remove os volumes declarados e pode apagar os dados persistidos no PostgreSQL.
-
-Para parar os serviços sem remover os volumes:
-
-```bash
-docker compose down
-```
-
-Os dados persistidos no volume do PostgreSQL devem ser preservados conforme a configuração do Docker Compose.
-
----
-
-## 18. Licença
-
-A licença do projeto deve ser definida pelos responsáveis antes da redistribuição pública.
-
-A licença escolhida deve ser compatível com os direitos dos autores e com as dependências utilizadas.
+A licença e as regras de contribuição devem ser definidas pelo mantenedor do repositório.
